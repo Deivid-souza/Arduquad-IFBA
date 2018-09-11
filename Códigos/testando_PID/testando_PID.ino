@@ -7,7 +7,7 @@
 #define pin_ch1 4 // 
 #define pin_ch2 5 //
 #define pin_ch3 6 // Trhottle
-#define pin_ch4 7 // Não Sei
+#define pin_ch4 7 //
 
 /*ESCs*/
 #define esc1 8 // Esquerda Frente
@@ -31,55 +31,55 @@ double throttle = 0,  //Canal 1   Eixo
        yaw = 0;       //Canal 4   Eixo
 
 
-/* Variáveis para o MPU-6050 */
+/* Variáveis para cálculos com o MPU-6050 */
 double accX, accY, accZ; //Valores lidos do acelerometro
 double gyroX, gyroY, gyroZ; //Valores lidos do giroscópio
-double kalAngleX, kalAngleY; // Angulos calculados usando o filtro de Kalman
 
-/*Calculos do PID*/
-double anguloLidoX = 0;
-double anguloLidoY = 0;
-double ang_desejado = 0;
+/*Angulos calculados usando o filtro de Kalman
+  usadas para receber a leitura do MPU*/
+double kalAngleX, // Frente a trás
+       kalAngleY, // Esquerda e Direita
+       ang_desejado = 0; //Valor Constante!
+
+
 
 uint8_t i2cData[14]; // Buffer para dados protocolo I2C
 uint32_t timer, temp_Pass = 0, temp_Prev;
 
-/*Calculos do PID*/
+/*variáveis que aplicam aceleração aos motores*/
 double pid,
        aceleracaoM1,
        aceleracaoM2,
        aceleracaoM3,
        aceleracaoM4;
 
-double p = 0;
-double i = 0;
-double d = 0;
-
 /*Constantes PID:*/
 double Kp = 0.35; // 0.35
 double Ki = 0.07; // 0.03
 double Kd = 0.17; // 0.05
 
-
-PID pidRoll(&anguloLidoX, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
-PID pidPitch(&anguloLidoY, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
+/*Objetos para Cáuculo do PID*/
+PID pidRoll(&kalAngleX, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
+PID pidPitch(&kalAngleY, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
 
 
 void setup() {
+  /*Monitoramento*/
   Serial.begin(115200);
   Wire.begin();
 
-  /*Pinos dos*/
+  /*Pinos dos motores*/
   motor1.attach(esc1); // Esquerda Frente
   motor2.attach(esc2); // Direita Frente
   motor3.attach(esc3); // Esquerda Tras.
   motor4.attach(esc4); // Direita Tras.
-
   /*Pinos de leitura do receptor rádio*/
   pinMode(pin_ch1, INPUT); // entrada canal 1
   pinMode(pin_ch2, INPUT); // entrada canal 2
   pinMode(pin_ch3, INPUT); // entrada canal 3
   pinMode(pin_ch4, INPUT); // entrada canal 4
+
+  initMotores();
 
   pidRoll.SetMode(AUTOMATIC);
   pidPitch.SetMode(AUTOMATIC);
@@ -87,27 +87,9 @@ void setup() {
   pidPitch.SetSampleTime(5); // tempo do loop
 
 
+
   /************** Protocolo I2C***************************/
-#if ARDUINO >= 157
-  Wire.setClock(400000UL); // Altera a frequencia I2C para 400kHz
-#else
-  TWBR = ((F_CPU / 400000UL) - 16) / 2; // Altera a frequencia I2C para 400kHz
-#endif
-
-  i2cData[0] = 7; // Altera a taxa de amostragem para 1000Hz - 8kHz/(7+1) = 1000Hz  (Define a frequencia de transmissao de dados do SDA)
-  i2cData[1] = 0x00; // Desabilita FSYNC e define a filtragem do acelerometro em 260 Hz, 256 Hz para o filtro do gisroscópio, 8 KHz de amostragem.
-  i2cData[2] = 0x00; // Altera a faixa completa de escala do giroscópio para ±250deg/s
-  i2cData[3] = 0x00; // Altera a faixa completa de escala do Acelerometro para ±2g
-  while (i2cWrite(0x19, i2cData, 4, false)); // Escreve em todos os registradores de uma vez
-  while (i2cWrite(0x6B, 0x01, true)); // PLL com eixo X do gyroscopio referencia e desabilita o modo sleep
-
-  while (i2cRead(0x75, i2cData, 1));
-  if (i2cData[0] != 0x68) { // Read "WHO_AM_I" register
-    Serial.print(F("Error reading sensor"));
-    while (1);
-  }
-
-  delay(100); // Wait for sensor to stabilize
+  iniciarMPU();
   /******************************************************************/
 
   /* Set kalman and gyro starting angle */
@@ -205,11 +187,9 @@ void loop() {
 
   /*Controlador PID***********************************************************************************************/
 
-  //angulo lido do MPU-6050
-  anguloLidoX = kalAngleX;
 
   //Corrigindo aceleracao com o PID
-  if ( anguloLidoX <= 0) { // se o angulo for negativo
+  if ( kalAngleX <= 0) { // se o angulo for negativo
     pidRoll.SetControllerDirection(DIRECT);
     pidRoll.Compute();
     aceleracaoM1 = throttle + pid;
@@ -244,10 +224,36 @@ void loop() {
 
 }
 
+/*Método Chamado no Setup() para ajustar comunicação
+  do Protocolo I2C e modos de leitura do MPU 6050.
+  Verificando se a comunicação foi feita com sucesso*/
+void iniciarMPU() {
+#if ARDUINO >= 157
+  Wire.setClock(400000UL); // Altera a frequencia I2C para 400kHz
+#else
+  TWBR = ((F_CPU / 400000UL) - 16) / 2; // Altera a frequencia I2C para 400kHz
+#endif
+
+  i2cData[0] = 7; // Altera a taxa de amostragem para 1000Hz - 8kHz/(7+1) = 1000Hz  (Define a frequencia de transmissao de dados do SDA)
+  i2cData[1] = 0x00; // Desabilita FSYNC e define a filtragem do acelerometro em 260 Hz, 256 Hz para o filtro do gisroscópio, 8 KHz de amostragem.
+  i2cData[2] = 0x00; // Altera a faixa completa de escala do giroscópio para ±250deg/s
+  i2cData[3] = 0x00; // Altera a faixa completa de escala do Acelerometro para ±2g
+  while (i2cWrite(0x19, i2cData, 4, false)); // Escreve em todos os registradores de uma vez
+  while (i2cWrite(0x6B, 0x01, true)); // PLL com eixo X do gyroscopio referencia e desabilita o modo sleep
+
+  while (i2cRead(0x75, i2cData, 1));
+  if (i2cData[0] != 0x68) { // Read "WHO_AM_I" register
+    Serial.print(F("Error reading sensor"));
+    while (1);
+  }
+
+  delay(100); // Wait for sensor to stabilize
+}
+
 
 void initMotores() {
   //Valor inicial para acionamento dos motores
-  motor1.writeMicroseconds(1000); 
+  motor1.writeMicroseconds(1000);
   motor2.writeMicroseconds(1000);
   motor3.writeMicroseconds(1000);
   motor4.writeMicroseconds(1000);
