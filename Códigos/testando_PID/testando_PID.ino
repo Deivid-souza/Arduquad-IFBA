@@ -3,7 +3,6 @@
 #include <Kalman.h> // Source: https://github.com/TKJElectronics/KalmanFilter
 #include <Servo.h>
 
-
 /*Canais do Rádio Controle - Turnigy 9X*/
 #define pin_ch1 4 // 
 #define pin_ch2 5 //
@@ -76,21 +75,11 @@ void setup() {
   motor3.attach(esc3); // Esquerda Tras.
   motor4.attach(esc4); // Direita Tras.
 
-  motor1.writeMicroseconds(1000); //Valor inicial para acionamento dos motores
-  motor2.writeMicroseconds(1000);
-  motor3.writeMicroseconds(1000);
-  motor4.writeMicroseconds(1000);
-
   /*Pinos de leitura do receptor rádio*/
   pinMode(pin_ch1, INPUT); // entrada canal 1
   pinMode(pin_ch2, INPUT); // entrada canal 2
   pinMode(pin_ch3, INPUT); // entrada canal 3
   pinMode(pin_ch4, INPUT); // entrada canal 4
-
-  roll = calibrarStick(pulseIn(pin_ch1, HIGH));
-  pitch = calibrarStick(pulseIn(pin_ch2, HIGH));
-  yaw = calibrarStick(pulseIn(pin_ch4, HIGH));
-  throttle = aceleracaoThrottle(pulseIn(pin_ch3, HIGH));
 
   pidRoll.SetMode(AUTOMATIC);
   pidPitch.SetMode(AUTOMATIC);
@@ -201,11 +190,23 @@ void loop() {
   kalAngleX = kalmanX.getAngle(roll, gyroXrate, dt); // Calculate the angle using a Kalman filter
 #endif
 
+  /*****************************************************************************************/
+  //Rádio controle:
+
+
+  //Leitura do PWM:
+  throttle = pulseIn(pin_ch3, HIGH);
+  //  roll = pulseIn(pin_ch1, HIGH);
+  //  pitch = pulseIn(pin_ch2, HIGH);
+  //  yaw = pulseIn(pin_ch4, HIGH);
+  //
+
+
+
   /*Controlador PID***********************************************************************************************/
 
   //angulo lido do MPU-6050
   anguloLidoX = kalAngleX;
-
 
   //Corrigindo aceleracao com o PID
   if ( anguloLidoX <= 0) { // se o angulo for negativo
@@ -224,53 +225,32 @@ void loop() {
   motor1.writeMicroseconds(aceleracaoM1);
   motor2.writeMicroseconds(aceleracaoM2 + 10);
 
-
   /* Print Data */
-//
-//  Serial.print("Angulo: ");
-//  Serial.print(kalAngleX);
-//  Serial.print("\t");
-//
-//  Serial.print("PID: ");
-//  Serial.print(pid);
-//  Serial.print("\t");
-//
-//  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
-//  Serial.print("\t");
-//  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+  //
+  //  Serial.print("Angulo: ");
+  //  Serial.print(kalAngleX);
+  //  Serial.print("\t");
+  //
+  //  Serial.print("PID: ");
+  //  Serial.print(pid);
+  //  Serial.print("\t");
+  //
+  //  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
+  //  Serial.print("\t");
+  //  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+
+
+
+
 }
 
 
-/**/
-double calibrarStick(unsigned long leitura_ch) {
-  if (leitura_ch != 0) {
-
-  }
-
-  return 0;
+void initMotores() {
+  //Valor inicial para acionamento dos motores
+  motor1.writeMicroseconds(1000); 
+  motor2.writeMicroseconds(1000);
+  motor3.writeMicroseconds(1000);
+  motor4.writeMicroseconds(1000);
 }
 
-double acelerarThrottle(unsigned long leitura) {
 
-  unsigned long aceleracao;
-  int diferenca = 0;
-
-
-
-
-  if (diferenca > 10) { // diferença grande
-    for (int i = 0; i < 10; i++) {
-      unsigned long leitura2 = pulseIn(pin_ch3, HIGH); // Segunda Leitura para comparação
-      diferenca = (leitura2 > leitura ? leitura2 - leitura : leitura - leitura2) ; // a diferenca recebe sempre um valor positivo entre o valor lido no setup e o lido agora
-    }
-    
-    
-      aceleracao = leitura2;
-      return aceleracao;
-    }
-
-  } else {
-    cont = 0;
-    return leitura;
-  }
-}
