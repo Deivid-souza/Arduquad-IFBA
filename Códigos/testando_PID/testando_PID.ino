@@ -3,32 +3,32 @@
 #include <Kalman.h> // Source: https://github.com/TKJElectronics/KalmanFilter
 #include <Servo.h>
 
-/*Canais do Rádio Controle - Turnigy 9X*/
-#define pin_ch1 4 // 
-#define pin_ch2 5 //
-#define pin_ch3 6 // Trhottle
-#define pin_ch4 7 //
+/*Canais do Rádio Controle - Turnigy 9X: MODE 2 */
+#define PIN_CH1 4 // Roll
+#define PIN_CH2 5 // Pitch
+#define PIN_CH3 6 // Trhottle
+#define PIN_CH4 7 // Yaw
 
 /*ESCs*/
-#define esc1 8 // Esquerda Frente
-#define esc2 9 // Direita Frente
-#define esc3 10 // Esquerda Tras.
-#define esc4 11 // Direita Tras.
+#define ESC1 8 // Esquerda Frente
+#define ESC2 9 // Direita Frente
+#define ESC3 10 // Esquerda Tras.
+#define ESC4 11 // Direita Tras.
 
 Servo motor1; // Esquerda Frente
 Servo motor2; // Direita Frente
 Servo motor3; // Esquerda Tras.
 Servo motor4; // Direita Tras.
 
-Kalman kalmanX; // Instancias para o filtro de Kalman
+Kalman kalmanX; // Instâncias para o filtro de Kalman
 Kalman kalmanY;
 #define RESTRICT_PITCH // Comment out to restrict roll to ±90deg instead - please read: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf
 
 /*Variáveis de controle do Rádio*/
-double throttle = 0,  //Canal 1   Eixo
-       roll = 0,      //Canal 2   Eixo
-       pitch = 0,     //Canal 3   Aceleração
-       yaw = 0;       //Canal 4   Eixo
+double  roll = 0,     //Canal 1   Eixo X
+        pitch = 0,    //Canal 1   Eixo Y
+        throttle = 0, //Canal 1   Aceleração
+        yaw = 0;      //Canal 4   Eixo Z
 
 
 /* Variáveis para cálculos com o MPU-6050 */
@@ -37,16 +37,14 @@ double gyroX, gyroY, gyroZ; //Valores lidos do giroscópio
 
 /*Angulos calculados usando o filtro de Kalman
   usadas para receber a leitura do MPU*/
-double kalAngleX, // Frente a trás
-       kalAngleY, // Esquerda e Direita
+double kalAngleX, // Esquerda e Direita
+       kalAngleY, // Frente a trás
        ang_desejado = 0; //Valor Constante!
 
-
-
 uint8_t i2cData[14]; // Buffer para dados protocolo I2C
-uint32_t timer, temp_Pass = 0, temp_Prev;
+uint32_t timer;
 
-/*variáveis que aplicam aceleração aos motores*/
+/*variáveis que aplicam aceleração aos motores individualmente*/
 double pid,
        aceleracaoM1,
        aceleracaoM2,
@@ -58,7 +56,7 @@ double Kp = 0.35; // 0.35
 double Ki = 0.07; // 0.03
 double Kd = 0.17; // 0.05
 
-/*Objetos para Cáuculo do PID*/
+/*Objetos para Cálculo do PID*/
 PID pidRoll(&kalAngleX, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
 PID pidPitch(&kalAngleY, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
 
@@ -69,24 +67,23 @@ void setup() {
   Wire.begin();
 
   /*Pinos dos motores*/
-  motor1.attach(esc1); // Esquerda Frente
-  motor2.attach(esc2); // Direita Frente
-  motor3.attach(esc3); // Esquerda Tras.
-  motor4.attach(esc4); // Direita Tras.
+  motor1.attach(ESC1); // Esquerda Frente
+  motor2.attach(ESC2); // Direita Frente
+  motor3.attach(ESC3); // Esquerda Tras.
+  motor4.attach(ESC4); // Direita Tras.
   /*Pinos de leitura do receptor rádio*/
-  pinMode(pin_ch1, INPUT); // entrada canal 1
-  pinMode(pin_ch2, INPUT); // entrada canal 2
-  pinMode(pin_ch3, INPUT); // entrada canal 3
-  pinMode(pin_ch4, INPUT); // entrada canal 4
-
+  pinMode(PIN_CH1, INPUT); // entrada Roll
+  pinMode(PIN_CH2, INPUT); // entrada Pitch
+  pinMode(PIN_CH3, INPUT); // entrada Trhottle
+  pinMode(PIN_CH4, INPUT); // entrada Yaw
+  
+  /*Aplicar aceleração inicial nos ESCs*/
   initMotores();
-
-  pidRoll.SetMode(AUTOMATIC);
+  /*Métodos da Biblioteca PID*/
+  pidRoll.SetMode(AUTOMATIC); // Modo de trabalho
   pidPitch.SetMode(AUTOMATIC);
   pidRoll.SetSampleTime(5); // tempo do loop
-  pidPitch.SetSampleTime(5); // tempo do loop
-
-
+  pidPitch.SetSampleTime(5);
 
   /************** Protocolo I2C***************************/
   iniciarMPU();
@@ -94,6 +91,7 @@ void setup() {
 
   /* Set kalman and gyro starting angle */
   while (i2cRead(0x3B, i2cData, 6));
+  /*Leituras do acelerometro no MPU*/
   accX = (int16_t)((i2cData[0] << 8) | i2cData[1]);
   accY = (int16_t)((i2cData[2] << 8) | i2cData[3]);
   accZ = (int16_t)((i2cData[4] << 8) | i2cData[5]);
@@ -101,6 +99,8 @@ void setup() {
   // Source: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf eq. 25 and eq. 26
   // atan2 outputs the value of -π to π (radians) - see http://en.wikipedia.org/wiki/Atan2
   // It is then converted from radians to degrees
+
+// Se RESTRICT_PITCH foi definido, compila essa parte do cálculo:
 #ifdef RESTRICT_PITCH // Eq. 25 and 26
   double roll  = atan2(accY, accZ) * RAD_TO_DEG;
   double pitch = atan(-accX / sqrt(accY * accY + accZ * accZ)) * RAD_TO_DEG;
@@ -109,29 +109,27 @@ void setup() {
   double pitch = atan2(-accX, accZ) * RAD_TO_DEG;
 #endif
 
-  kalmanX.setAngle(roll); // Atribui os ângulos iniciais
+  kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
   kalmanY.setAngle(pitch);
-
   timer = micros(); // Pega o tempo de funcionamento da placa, para uso do Filtro.
 
   delay(4000); // Aguarda os motores calibrarem (Bips)
-  //tempo = millis(); // Inicia a contagem para a Derivada do PID
 }
 
 void loop() {
 
 
-  /* Atualiza os Valores do sensor */
+  /* Atualiza os Valores do acelerometro */
   while (i2cRead(0x3B, i2cData, 14));
   accX = (int16_t)((i2cData[0] << 8) | i2cData[1]);
   accY = (int16_t)((i2cData[2] << 8) | i2cData[3]);
   accZ = (int16_t)((i2cData[4] << 8) | i2cData[5]);
-
+  /* Atualiza os Valores do giroscópio */
   gyroX = (int16_t)((i2cData[8] << 8) | i2cData[9]);
   gyroY = (int16_t)((i2cData[10] << 8) | i2cData[11]);
   gyroZ = (int16_t)((i2cData[12] << 8) | i2cData[13]);;
 
-  double dt = (double)(micros() - timer) / 1000000; // Calcula o delta tempo
+  double dt = (double)(micros() - timer) / 1000000; // Calcula a variação do tempo
   timer = micros();
 
   // Source: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf eq. 25 and eq. 26
@@ -177,10 +175,10 @@ void loop() {
 
 
   //Leitura do PWM:
-  throttle = pulseIn(pin_ch3, HIGH);
-  //  roll = pulseIn(pin_ch1, HIGH);
-  //  pitch = pulseIn(pin_ch2, HIGH);
-  //  yaw = pulseIn(pin_ch4, HIGH);
+  throttle = pulseIn(PIN_CH3, HIGH);
+  //  roll = pulseIn(PIN_CH1, HIGH);
+  //  pitch = pulseIn(PIN_CH2, HIGH);
+  //  yaw = pulseIn(PIN_CH4, HIGH);
   //
 
 
