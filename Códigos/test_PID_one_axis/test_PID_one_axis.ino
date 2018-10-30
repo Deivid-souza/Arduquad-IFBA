@@ -183,7 +183,7 @@ void loop() {
 
     I = I;                  // Mantem o valor de I
   } else {
-    I = I + (Ki * (erroX * dt * 1)); //Integrando
+    I = I + (Ki * (erroX * pidDt * 1)); //Integrando
   }
 
   //Soma dos termos
