@@ -37,7 +37,7 @@ double aceleracaoM1,
        aceleracaoM2;
 
 /*Constantes PID:*/
-double Kp = 1.00;
+double Kp = 1.0;
 double Ki = 0.2;
 double Kd = 1.0;
 
@@ -180,37 +180,36 @@ void loop() {
   if (abs(pidX) >= 10 && (((erroX >= 0) && (I >= 0)) || ((erroX < 0) && (I < 0)))) {
     Serial.print("\t");
     Serial.println("WIND-UP!");
-    
+
     I = I;                  // Mantem o valor de I
   } else {
-    I = I + (Ki * (erroX * dt*1)); //Integrando
+    I = I + (Ki * (erroX * dt * 1)); //Integrando
   }
-
-
 
   //Soma dos termos
   pidX = P + I + (Kd * D);
-
-
-
   erroAnteriorX = erroX;
 
 
   //Corrigindo aceleracao com o PID
 
-  aceleracaoM1 = throttle + (pidX / 2);
-  aceleracaoM2 = throttle - (pidX / 2);
-
-  if (aceleracaoM1 > 1500) {      //
-    aceleracaoM1 = 1500;
-
+  if (pidX >= 0) { // Observou-se que se o PID é positivo o angulo lido é negativo!
+    aceleracaoM1 = throttle + (abs(pidX)/2);
+    aceleracaoM2 = throttle - (abs(pidX)/2);
+  } else {
+    aceleracaoM2 = throttle + (abs(pidX)/2);
+    aceleracaoM1 = throttle - (abs(pidX)/2);
   }
 
-  if (aceleracaoM2 > 1500) {      //
-    aceleracaoM2 = 1500;
-
+  // Segurança na aceleração:
+  if (aceleracaoM1 > 1400) {      //
+    aceleracaoM1 = 1400;
+  }
+  if (aceleracaoM2 > 1400) {      //
+    aceleracaoM2 = 1400;
   }
 
+  // Escrever correção
   motor1.writeMicroseconds(aceleracaoM1);
   motor2.writeMicroseconds(aceleracaoM2);
 
@@ -243,6 +242,7 @@ void loop() {
   Serial.print(D);
   Serial.print("\t");
   Serial.print("\t");
+  Serial.print("  ");
 
   Serial.print("PID: ");
   Serial.print(pidX);
