@@ -37,13 +37,13 @@ double aceleracaoM1,
        aceleracaoM2;
 
 /*Constantes PID:*/
-double Kp = 1.00; // 0.35
-double Ki = 0.0005; // 0.03
-double Kd = 0.05; // 0.05
+double Kp = 1.00;
+double Ki = 0.2;
+double Kd = 1.0;
 
 double pidX, erroX = 0, erroAnteriorX = 0;
 double P = 0;
-double inte = 0;
+double I = 0;
 double D = 0;
 double pidDt = 0.08; // Variação de tempo/Tempo do Loop
 
@@ -177,17 +177,19 @@ void loop() {
 
 
   // Anti Wind-up - Integração condicional
-  if (abs(pidX) >= 10.0 && (((erroX >= 0) && (inte >= 0)) || ((erroX < 0) && (inte < 0)))) {
-    Serial.print("ENTROU!!!!!");
-    inte = inte;                  // Mantem o valor de I
+  if (abs(pidX) >= 10 && (((erroX >= 0) && (I >= 0)) || ((erroX < 0) && (I < 0)))) {
+    Serial.print("\t");
+    Serial.println("WIND-UP!");
+    
+    I = I;                  // Mantem o valor de I
   } else {
-    inte += inte + (Ki * (erroX * dt)); //Integrando
+    I = I + (Ki * (erroX * dt*1)); //Integrando
   }
 
 
 
   //Soma dos termos
-  pidX = P + inte + (Kd * D);
+  pidX = P + I + (Kd * D);
 
 
 
@@ -196,8 +198,8 @@ void loop() {
 
   //Corrigindo aceleracao com o PID
 
-  aceleracaoM1 = throttle - (pidX / 2);
-  aceleracaoM2 = throttle + (pidX / 2);
+  aceleracaoM1 = throttle + (pidX / 2);
+  aceleracaoM2 = throttle - (pidX / 2);
 
   if (aceleracaoM1 > 1500) {      //
     aceleracaoM1 = 1500;
@@ -233,7 +235,7 @@ void loop() {
   Serial.print("\t");
 
   Serial.print("I: ");
-  Serial.print(inte);
+  Serial.print(I);
   Serial.print("\t");
   Serial.print("\t");
 
@@ -241,25 +243,21 @@ void loop() {
   Serial.print(D);
   Serial.print("\t");
   Serial.print("\t");
-  Serial.print("\t");
 
   Serial.print("PID: ");
   Serial.print(pidX);
   Serial.print("\t");
-  Serial.print("\t");
+  Serial.println("\t");
 
-  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
-  Serial.print("\t");
-  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+  //  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
+  // Serial.print("\t");
+  // Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
 
 
 
 
 
 }
-
-
-
 
 
 
