@@ -3,33 +3,21 @@
 #include <Kalman.h> // Source: https://github.com/TKJElectronics/KalmanFilter
 #include <Servo.h>
 
-/*Canais do Rádio Controle - Turnigy 9X: MODE 2 */
-#define PIN_CH1 4 // Roll
-#define PIN_CH2 5 // Pitch
-#define PIN_CH3 6 // Trhottle
-#define PIN_CH4 7 // Yaw
 
 /*ESCs*/
 #define ESC1 8 // Esquerda Frente
 #define ESC2 9 // Direita Frente
-#define ESC3 10 // Esquerda Tras.
-#define ESC4 11 // Direita Tras.
 
 Servo motor1; // Esquerda Frente
 Servo motor2; // Direita Frente
-Servo motor3; // Esquerda Tras.
-Servo motor4; // Direita Tras.
 
 Kalman kalmanX; // Instâncias para o filtro de Kalman
 Kalman kalmanY;
+
 #define RESTRICT_PITCH // Comment out to restrict roll to ±90deg instead - please read: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf
 
 /*Variáveis de controle do Rádio*/
-double  roll = 0,     //Canal 1   Eixo X
-        pitch = 0,    //Canal 1   Eixo Y
-        throttle = 0, //Canal 1   Aceleração
-        yaw = 0;      //Canal 4   Eixo Z
-
+double  throttle = 1300; //Canal 1   Aceleração
 
 /* Variáveis para cálculos com o MPU-6050 */
 double accX, accY, accZ; //Valores lidos do acelerometro
@@ -38,27 +26,27 @@ double gyroX, gyroY, gyroZ; //Valores lidos do giroscópio
 /*Angulos calculados usando o filtro de Kalman
   usadas para receber a leitura do MPU*/
 double kalAngleX, // Esquerda e Direita
-       kalAngleY, // Frente a trás
+       kalAngleY,
        ang_desejado = 0; //Valor Constante!
 
 uint8_t i2cData[14]; // Buffer para dados protocolo I2C
 uint32_t timer;
 
 /*variáveis que aplicam aceleração aos motores individualmente*/
-double pid,
-       aceleracaoM1,
-       aceleracaoM2,
-       aceleracaoM3,
-       aceleracaoM4;
+double aceleracaoM1,
+       aceleracaoM2;
 
 /*Constantes PID:*/
-double Kp = 0.35; // 0.35
-double Ki = 0.07; // 0.03
-double Kd = 0.17; // 0.05
+double Kp = 1.00; // 0.35
+double Ki = 0.0005; // 0.03
+double Kd = 0.05; // 0.05
 
-/*Objetos para Cálculo do PID*/
-PID pidRoll(&kalAngleX, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
-PID pidPitch(&kalAngleY, &pid, &ang_desejado, Kp, Ki, Kd, DIRECT);
+double pidX, erroX = 0, erroAnteriorX = 0;
+double P = 0;
+double inte = 0;
+double D = 0;
+double pidDt = 0.08; // Variação de tempo/Tempo do Loop
+
 
 
 void setup() {
@@ -69,21 +57,10 @@ void setup() {
   /*Pinos dos motores*/
   motor1.attach(ESC1); // Esquerda Frente
   motor2.attach(ESC2); // Direita Frente
-  motor3.attach(ESC3); // Esquerda Tras.
-  motor4.attach(ESC4); // Direita Tras.
-  /*Pinos de leitura do receptor rádio*/
-  pinMode(PIN_CH1, INPUT); // entrada Roll
-  pinMode(PIN_CH2, INPUT); // entrada Pitch
-  pinMode(PIN_CH3, INPUT); // entrada Trhottle
-  pinMode(PIN_CH4, INPUT); // entrada Yaw
-  
+
   /*Aplicar aceleração inicial nos ESCs*/
   initMotores();
-  /*Métodos da Biblioteca PID*/
-  pidRoll.SetMode(AUTOMATIC); // Modo de trabalho
-  pidPitch.SetMode(AUTOMATIC);
-  pidRoll.SetSampleTime(5); // tempo do loop
-  pidPitch.SetSampleTime(5);
+
 
   /************** Protocolo I2C***************************/
   iniciarMPU();
@@ -100,7 +77,7 @@ void setup() {
   // atan2 outputs the value of -π to π (radians) - see http://en.wikipedia.org/wiki/Atan2
   // It is then converted from radians to degrees
 
-// Se RESTRICT_PITCH foi definido, compila essa parte do cálculo:
+  // Se RESTRICT_PITCH foi definido, compila essa parte do cálculo:
 #ifdef RESTRICT_PITCH // Eq. 25 and 26
   double roll  = atan2(accY, accZ) * RAD_TO_DEG;
   double pitch = atan(-accX / sqrt(accY * accY + accZ * accZ)) * RAD_TO_DEG;
@@ -109,8 +86,8 @@ void setup() {
   double pitch = atan2(-accX, accZ) * RAD_TO_DEG;
 #endif
 
-  kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
-  kalmanY.setAngle(pitch);
+  //  kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
+  //  kalmanY.setAngle(pitch);
   timer = micros(); // Pega o tempo de funcionamento da placa, para uso do Filtro.
 
   delay(4000); // Aguarda os motores calibrarem (Bips)
@@ -170,57 +147,129 @@ void loop() {
   kalAngleX = kalmanX.getAngle(roll, gyroXrate, dt); // Calculate the angle using a Kalman filter
 #endif
 
-  /*****************************************************************************************/
-  //Rádio controle:
-
-
-  //Leitura do PWM:
-  throttle = pulseIn(PIN_CH3, HIGH);
-  //  roll = pulseIn(PIN_CH1, HIGH);
-  //  pitch = pulseIn(PIN_CH2, HIGH);
-  //  yaw = pulseIn(PIN_CH4, HIGH);
-  //
-
 
 
   /*Controlador PID***********************************************************************************************/
 
+  //           ________________________________
+  //          |            MPU-6050            |
+  //          |            ________            |
+  //          |           |________|           |
+  //          |            _________           |
+  //          |           |  Acel   | ^        |
+  //          |           |  Giro   | | X      |
+  //          |           |__Temp___|          |
+  //          |               <---             |
+  //          |                Y               |
+  //          | +   -  scl sda xda xcl ado int |
+  //          | 0   0   0   0   0   0   0   0  |
+  //          |________________________________|
+  //
+
+
+  erroX = ang_desejado - kalAngleX;
+
+  // Proporcional
+  P = Kp * erroX;
+
+  //Derivativo
+  D = (erroX - erroAnteriorX) / pidDt;
+
+
+  // Anti Wind-up - Integração condicional
+  if (abs(pidX) >= 10.0 && (((erroX >= 0) && (inte >= 0)) || ((erroX < 0) && (inte < 0)))) {
+    Serial.print("ENTROU!!!!!");
+    inte = inte;                  // Mantem o valor de I
+  } else {
+    inte += inte + (Ki * (erroX * dt)); //Integrando
+  }
+
+
+
+  //Soma dos termos
+  pidX = P + inte + (Kd * D);
+
+
+
+  erroAnteriorX = erroX;
+
 
   //Corrigindo aceleracao com o PID
-  if ( kalAngleX <= 0) { // se o angulo for negativo
-    pidRoll.SetControllerDirection(DIRECT);
-    pidRoll.Compute();
-    aceleracaoM1 = throttle + pid;
-    aceleracaoM2 = throttle - (pid);
 
-  } else {
-    pidRoll.SetControllerDirection(REVERSE);
-    pidRoll.Compute();
-    aceleracaoM2 = throttle + pid;
-    aceleracaoM1 = throttle - (pid);
+  aceleracaoM1 = throttle - (pidX / 2);
+  aceleracaoM2 = throttle + (pidX / 2);
+
+  if (aceleracaoM1 > 1500) {      //
+    aceleracaoM1 = 1500;
+
+  }
+
+  if (aceleracaoM2 > 1500) {      //
+    aceleracaoM2 = 1500;
+
   }
 
   motor1.writeMicroseconds(aceleracaoM1);
-  motor2.writeMicroseconds(aceleracaoM2 + 10);
+  motor2.writeMicroseconds(aceleracaoM2);
+
+
+
 
   /* Print Data */
-  //
-  //  Serial.print("Angulo: ");
-  //  Serial.print(kalAngleX);
-  //  Serial.print("\t");
-  //
-  //  Serial.print("PID: ");
-  //  Serial.print(pid);
-  //  Serial.print("\t");
-  //
-  //  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
-  //  Serial.print("\t");
-  //  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+
+  Serial.print("Angulo: ");
+  Serial.print(kalAngleX);
+  Serial.print("\t");
+  Serial.print("\t");
+
+  Serial.print("Erro: ");
+  Serial.print(erroX);
+  Serial.print("\t");
+  Serial.print("\t");
+
+  Serial.print("P: ");
+  Serial.print(P);
+  Serial.print("\t");
+  Serial.print("\t");
+
+  Serial.print("I: ");
+  Serial.print(inte);
+  Serial.print("\t");
+  Serial.print("\t");
+
+  Serial.print("D: ");
+  Serial.print(D);
+  Serial.print("\t");
+  Serial.print("\t");
+  Serial.print("\t");
+
+  Serial.print("PID: ");
+  Serial.print(pidX);
+  Serial.print("\t");
+  Serial.print("\t");
+
+  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
+  Serial.print("\t");
+  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+
 
 
 
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /*Método Chamado no Setup() para ajustar comunicação
   do Protocolo I2C e modos de leitura do MPU 6050.
@@ -253,8 +302,4 @@ void initMotores() {
   //Valor inicial para acionamento dos motores
   motor1.writeMicroseconds(1000);
   motor2.writeMicroseconds(1000);
-  motor3.writeMicroseconds(1000);
-  motor4.writeMicroseconds(1000);
 }
-
-
