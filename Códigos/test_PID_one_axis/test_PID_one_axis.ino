@@ -36,16 +36,16 @@ uint32_t timer;
 double aceleracaoM1,
        aceleracaoM2;
 
-/*Constantes PID:*/
-double Kp = 1.0;
-double Ki = 0.2;
-double Kd = 1.0;
+/*Constantes PID:                   Atuação*/
+double Kp = 1.85; // 1.85           Força
+double Ki = 0.03; // 0.3            Precisão
+double Kd = 0.46; //0.40 a 0.50     Velocidade
 
 double pidX, erroX = 0, erroAnteriorX = 0;
 double P = 0;
 double I = 0;
 double D = 0;
-double pidDt = 0.08; // Variação de tempo/Tempo do Loop
+double pidDt, tempo, tempoAnterior; // Variação de tempo/Tempo do Loop
 
 
 
@@ -60,7 +60,6 @@ void setup() {
 
   /*Aplicar aceleração inicial nos ESCs*/
   initMotores();
-
 
   /************** Protocolo I2C***************************/
   iniciarMPU();
@@ -89,13 +88,16 @@ void setup() {
   //  kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
   //  kalmanY.setAngle(pitch);
   timer = micros(); // Pega o tempo de funcionamento da placa, para uso do Filtro.
-
+  tempo = millis(); // Inicia o contador da variaçãp de tempo do PID
   delay(4000); // Aguarda os motores calibrarem (Bips)
 }
 
 void loop() {
-
-
+  /*Calculo da Variação de tempo para derivativa PID*/
+  tempoAnterior = tempo;
+  tempo = millis();
+  pidDt = (tempo - tempoAnterior)/1000;
+  
   /* Atualiza os Valores do acelerometro */
   while (i2cRead(0x3B, i2cData, 14));
   accX = (int16_t)((i2cData[0] << 8) | i2cData[1]);
@@ -106,7 +108,7 @@ void loop() {
   gyroY = (int16_t)((i2cData[10] << 8) | i2cData[11]);
   gyroZ = (int16_t)((i2cData[12] << 8) | i2cData[13]);;
 
-  double dt = (double)(micros() - timer) / 1000000; // Calcula a variação do tempo
+  double dt = (double)(micros() - timer) / 1000000; // Calcula a variação do tempo para o MPU
   timer = micros();
 
   // Source: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf eq. 25 and eq. 26
@@ -147,8 +149,6 @@ void loop() {
   kalAngleX = kalmanX.getAngle(roll, gyroXrate, dt); // Calculate the angle using a Kalman filter
 #endif
 
-
-
   /*Controlador PID***********************************************************************************************/
 
   //           ________________________________
@@ -166,47 +166,50 @@ void loop() {
   //          |________________________________|
   //
 
+  /*O TESTE FOI PLANEJADO NO EIXO 'X', PORÉM FOI EXECUTADO
+    NO ÂNGULO 'Y' (KalangleY). */
 
-  erroX = ang_desejado - kalAngleX;
+  //Salva o erro anterior e calcula o atual
+  erroAnteriorX = erroX; 
+  erroX = ang_desejado - kalAngleY; 
+
 
   // Proporcional
   P = Kp * erroX;
 
   //Derivativo
-  D = (erroX - erroAnteriorX) / pidDt;
+  D = Kd *((erroX - erroAnteriorX) / pidDt);
 
 
-  // Anti Wind-up - Integração condicional
-  if (abs(pidX) >= 10 && (((erroX >= 0) && (I >= 0)) || ((erroX < 0) && (I < 0)))) {
+  /*  Anti Wind-up - Integral condicional
+      Aqui é importante observar o angulo de atuação 
+      da condicional*/
+  if (abs(pidX) >= 2 && (((erroX >= 0) && (I >= 0)) || ((erroX < 0) && (I < 0)))) {
     Serial.print("\t");
     Serial.println("WIND-UP!");
-
     I = I;                  // Mantem o valor de I
   } else {
-    I = I + (Ki * (erroX * pidDt * 1)); //Integrando
+    I = I + (Ki * (erroX * pidDt)); //Integra normalmente
   }
 
   //Soma dos termos
-  pidX = P + I + (Kd * D);
-  erroAnteriorX = erroX;
-
+  pidX = P + I + D;
+  
 
   //Corrigindo aceleracao com o PID
 
-  if (pidX >= 0) { // Observou-se que se o PID é positivo o angulo lido é negativo!
-    aceleracaoM1 = throttle + (abs(pidX)/2);
-    aceleracaoM2 = throttle - (abs(pidX)/2);
-  } else {
-    aceleracaoM2 = throttle + (abs(pidX)/2);
-    aceleracaoM1 = throttle - (abs(pidX)/2);
-  }
+  // Observou-se que se o PID é positivo, 
+  // o angulo lido é negativo e vice versa!
+    aceleracaoM1 = throttle + pidX;
+    aceleracaoM2 = throttle - pidX;
 
+  
   // Segurança na aceleração:
-  if (aceleracaoM1 > 1400) {      //
-    aceleracaoM1 = 1400;
+  if (aceleracaoM1 > 1500) {      //
+    aceleracaoM1 = 1500;
   }
-  if (aceleracaoM2 > 1400) {      //
-    aceleracaoM2 = 1400;
+  if (aceleracaoM2 > 1500) {      //
+    aceleracaoM2 = 1500;
   }
 
   // Escrever correção
@@ -214,10 +217,9 @@ void loop() {
   motor2.writeMicroseconds(aceleracaoM2);
 
 
+  // Print Data 
 
-
-  /* Print Data */
-
+/*
   Serial.print("Angulo: ");
   Serial.print(kalAngleX);
   Serial.print("\t");
@@ -249,29 +251,19 @@ void loop() {
   Serial.print("\t");
   Serial.println("\t");
 
-  //  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
-  // Serial.print("\t");
-  // Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
+  Serial.print("\t");
+  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
 
+*/
 
-
-
-
-}
-
-
-
-
-
-
-
-
+} // Fim do Loop
 
 
 
 /*Método Chamado no Setup() para ajustar comunicação
   do Protocolo I2C e modos de leitura do MPU 6050.
-  Verificando se a comunicação foi feita com sucesso*/
+  Verifica se a comunicação foi feita com sucesso*/
 void iniciarMPU() {
 #if ARDUINO >= 157
   Wire.setClock(400000UL); // Altera a frequencia I2C para 400kHz
@@ -291,7 +283,6 @@ void iniciarMPU() {
     Serial.print(F("Error reading sensor"));
     while (1);
   }
-
   delay(100); // Wait for sensor to stabilize
 }
 
