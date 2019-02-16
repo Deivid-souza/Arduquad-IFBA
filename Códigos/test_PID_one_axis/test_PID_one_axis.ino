@@ -1,23 +1,17 @@
-#include <PID_v1.h>
 #include <Wire.h>
 #include <Kalman.h> // Source: https://github.com/TKJElectronics/KalmanFilter
 #include <Servo.h>
-
-
 /*ESCs*/
 #define ESC1 8 // Esquerda Frente
 #define ESC2 9 // Direita Frente
 
 Servo motor1; // Esquerda Frente
 Servo motor2; // Direita Frente
-
 Kalman kalmanX; // Instâncias para o filtro de Kalman
 Kalman kalmanY;
 
-#define RESTRICT_PITCH // Comment out to restrict roll to ±90deg instead - please read: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf
-
-/*Variáveis de controle do Rádio*/
-double  throttle = 1300; //Canal 1   Aceleração
+/*Aceleração padrão*/
+double  throttle = 1300; 
 
 /* Variáveis para cálculos com o MPU-6050 */
 double accX, accY, accZ; //Valores lidos do acelerometro
@@ -33,13 +27,13 @@ uint8_t i2cData[14]; // Buffer para dados protocolo I2C
 uint32_t timer;
 
 /*variáveis que aplicam aceleração aos motores individualmente*/
-double aceleracaoM1,
-       aceleracaoM2;
+double aceleracaoM1,  //esquerdo
+       aceleracaoM2;  //direito
 
 /*Constantes PID:                   Atuação*/
-double Kp = 1.85; // 1.85           Força
-double Ki = 0.03; // 0.3            Precisão
-double Kd = 0.46; //0.40 a 0.50     Velocidade
+double Kp = 0.6; // 1.85   0.6        Força
+double Ki = 0.7; // 0.3    0.7        Precisão
+double Kd = 0.76; //0.46 a 0.76     Velocidade
 
 double pidX, erroX = 0, erroAnteriorX = 0;
 double P = 0;
@@ -51,7 +45,7 @@ double pidDt, tempo, tempoAnterior; // Variação de tempo/Tempo do Loop
 
 void setup() {
   /*Monitoramento*/
-  Serial.begin(115200);
+  Serial.begin(9600);
   Wire.begin();
 
   /*Pinos dos motores*/
@@ -76,17 +70,11 @@ void setup() {
   // atan2 outputs the value of -π to π (radians) - see http://en.wikipedia.org/wiki/Atan2
   // It is then converted from radians to degrees
 
-  // Se RESTRICT_PITCH foi definido, compila essa parte do cálculo:
-#ifdef RESTRICT_PITCH // Eq. 25 and 26
   double roll  = atan2(accY, accZ) * RAD_TO_DEG;
   double pitch = atan(-accX / sqrt(accY * accY + accZ * accZ)) * RAD_TO_DEG;
-#else // Eq. 28 and 29
-  double roll  = atan(accY / sqrt(accX * accX + accZ * accZ)) * RAD_TO_DEG;
-  double pitch = atan2(-accX, accZ) * RAD_TO_DEG;
-#endif
 
-  //  kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
-  //  kalmanY.setAngle(pitch);
+  kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
+  kalmanY.setAngle(pitch);
   timer = micros(); // Pega o tempo de funcionamento da placa, para uso do Filtro.
   tempo = millis(); // Inicia o contador da variaçãp de tempo do PID
   delay(4000); // Aguarda os motores calibrarem (Bips)
@@ -96,8 +84,8 @@ void loop() {
   /*Calculo da Variação de tempo para derivativa PID*/
   tempoAnterior = tempo;
   tempo = millis();
-  pidDt = (tempo - tempoAnterior)/1000;
-  
+  pidDt = (tempo - tempoAnterior) / 1000;
+
   /* Atualiza os Valores do acelerometro */
   while (i2cRead(0x3B, i2cData, 14));
   accX = (int16_t)((i2cData[0] << 8) | i2cData[1]);
@@ -114,18 +102,13 @@ void loop() {
   // Source: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf eq. 25 and eq. 26
   // atan2 outputs the value of -π to π (radians) - see http://en.wikipedia.org/wiki/Atan2
   // Conversão de radioanos para graus
-#ifdef RESTRICT_PITCH // Eq. 25 and 26
+
   double roll  = atan2(accY, accZ) * RAD_TO_DEG;
   double pitch = atan(-accX / sqrt(accY * accY + accZ * accZ)) * RAD_TO_DEG;
-#else // Eq. 28 and 29
-  double roll  = atan(accY / sqrt(accX * accX + accZ * accZ)) * RAD_TO_DEG;
-  double pitch = atan2(-accX, accZ) * RAD_TO_DEG;
-#endif
 
   double gyroXrate = gyroX / 131.0; // Conversão para deg/s
   double gyroYrate = gyroY / 131.0; // Conversão para deg/s
 
-#ifdef RESTRICT_PITCH
   // This fixes the transition problem when the accelerometer angle jumps between -180 and 180 degrees
   if ((roll < -90 && kalAngleX > 90) || (roll > 90 && kalAngleX < -90)) {
     kalmanX.setAngle(roll);
@@ -136,18 +119,6 @@ void loop() {
   if (abs(kalAngleX) > 90)
     gyroYrate = -gyroYrate; // Invert rate, so it fits the restriced accelerometer reading
   kalAngleY = kalmanY.getAngle(pitch, gyroYrate, dt);
-#else
-  // This fixes the transition problem when the accelerometer angle jumps between -180 and 180 degrees
-  if ((pitch < -90 && kalAngleY > 90) || (pitch > 90 && kalAngleY < -90)) {
-    kalmanY.setAngle(pitch);
-    kalAngleY = pitch;
-  } else
-    kalAngleY = kalmanY.getAngle(pitch, gyroYrate, dt); // Calculate the angle using a Kalman filter
-
-  if (abs(kalAngleY) > 90)
-    gyroXrate = -gyroXrate; // Invert rate, so it fits the restriced accelerometer reading
-  kalAngleX = kalmanX.getAngle(roll, gyroXrate, dt); // Calculate the angle using a Kalman filter
-#endif
 
   /*Controlador PID***********************************************************************************************/
 
@@ -166,44 +137,42 @@ void loop() {
   //          |________________________________|
   //
 
-  /*O TESTE FOI PLANEJADO NO EIXO 'X', PORÉM FOI EXECUTADO
-    NO ÂNGULO 'Y' (KalangleY). */
 
-  //Salva o erro anterior e calcula o atual
-  erroAnteriorX = erroX; 
-  erroX = ang_desejado - kalAngleY; 
-
+  //Salva o erro anterior e calcula o atual,
+  erroAnteriorX = erroX;
+  erroX = ang_desejado - kalAngleX;
 
   // Proporcional
   P = Kp * erroX;
 
   //Derivativo
-  D = Kd *((erroX - erroAnteriorX) / pidDt);
+  D = Kd * ((erroX - erroAnteriorX) / pidDt);
 
+  //  Integral com Anti Wind-up condicional
+  if (abs(pidX) >= 3 &&
+      (((erroX >= 0) && (I >= 0)) ||
+       ((erroX < 0) && (I < 0)))) {
 
-  /*  Anti Wind-up - Integral condicional
-      Aqui é importante observar o angulo de atuação 
-      da condicional*/
-  if (abs(pidX) >= 2 && (((erroX >= 0) && (I >= 0)) || ((erroX < 0) && (I < 0)))) {
-    Serial.print("\t");
-    Serial.println("WIND-UP!");
-    I = I;                  // Mantem o valor de I
-  } else {
-    I = I + (Ki * (erroX * pidDt)); //Integra normalmente
+    I = I;  // Mantem o valor de I
+
+  } else {  //Integra normalmente
+
+    I = I + (Ki * (erroX * pidDt));
+
   }
 
   //Soma dos termos
   pidX = P + I + D;
-  
+
 
   //Corrigindo aceleracao com o PID
 
-  // Observou-se que se o PID é positivo, 
+  // Observou-se que se o PID é positivo,
   // o angulo lido é negativo e vice versa!
-    aceleracaoM1 = throttle + pidX;
-    aceleracaoM2 = throttle - pidX;
+  aceleracaoM1 = throttle + pidX;
+  aceleracaoM2 = throttle - pidX;
 
-  
+
   // Segurança na aceleração:
   if (aceleracaoM1 > 1500) {      //
     aceleracaoM1 = 1500;
@@ -217,14 +186,12 @@ void loop() {
   motor2.writeMicroseconds(aceleracaoM2);
 
 
-  // Print Data 
-
-/*
+  // Print Data
   Serial.print("Angulo: ");
   Serial.print(kalAngleX);
   Serial.print("\t");
-  Serial.print("\t");
-
+  Serial.println("\t");
+/*
   Serial.print("Erro: ");
   Serial.print(erroX);
   Serial.print("\t");
@@ -251,9 +218,9 @@ void loop() {
   Serial.print("\t");
   Serial.println("\t");
 
-  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
-  Serial.print("\t");
-  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
+  //  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
+  //  Serial.print("\t");
+  //  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
 
 */
 
