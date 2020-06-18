@@ -1,17 +1,30 @@
-#include <Wire.h>
-#include <Kalman.h> // Source: https://github.com/TKJElectronics/KalmanFilter
-#include <Servo.h>
+#include <Wire.h> // COmunicação através de protocolo I2C
+#include <Kalman.h> // Filtro de Kalman Source: https://github.com/TKJElectronics/KalmanFilter
+#include <Servo.h> // Controle dos motores Brushless
+
+//PINOS:
 /*ESCs*/
 #define ESC1 8 // Esquerda Frente
 #define ESC2 9 // Direita Frente
+/*Potenciometros de ajuste PID*/
+#define P_pot A10 // FIO BRANCO
+#define I_pot A9  // FIO ROXO
+#define D_pot A8  // FIO AZUL
 
+//OBJETOS:
 Servo motor1; // Esquerda Frente
 Servo motor2; // Direita Frente
 Kalman kalmanX; // Instâncias para o filtro de Kalman
 Kalman kalmanY;
 
+//VARIÁVEIS
+/*Potenciometros*/
+int leitura_P = 0;
+int leitura_I = 0;
+int leitura_D = 0;
 /*Aceleração padrão*/
-double  throttle = 1300; 
+double  throttle = 1300;
+
 
 /* Variáveis para cálculos com o MPU-6050 */
 double accX, accY, accZ; //Valores lidos do acelerometro
@@ -25,22 +38,21 @@ double kalAngleX, // Esquerda e Direita
 
 uint8_t i2cData[14]; // Buffer para dados protocolo I2C
 uint32_t timer;
+double pidDt, tempo, tempoAnterior = 0;
 
 /*variáveis que aplicam aceleração aos motores individualmente*/
 double aceleracaoM1,  //esquerdo
-       aceleracaoM2;  //direito
+       aceleracaoM2 = 0;  //direito
 
 /*Constantes PID:                   Atuação*/
-double Kp = 0.6; // 1.85   0.6        Força
-double Ki = 0.7; // 0.3    0.7        Precisão
-double Kd = 0.76; //0.46 a 0.76     Velocidade
+double Kp = 0;  //0.6; // 1.85   0.6        Força
+double Ki = 0;  //0.7; // 0.3    0.7        Precisão
+double Kd = 0;  //0.76; //0.46 a 0.76     Velocidade
 
 double pidX, erroX = 0, erroAnteriorX = 0;
 double P = 0;
 double I = 0;
 double D = 0;
-double pidDt, tempo, tempoAnterior; // Variação de tempo/Tempo do Loop
-
 
 
 void setup() {
@@ -51,7 +63,10 @@ void setup() {
   /*Pinos dos motores*/
   motor1.attach(ESC1); // Esquerda Frente
   motor2.attach(ESC2); // Direita Frente
-
+  /*Pinos dos potenciometros de ajuste PID*/
+  pinMode(P_pot, INPUT);
+  pinMode(I_pot, INPUT);
+  pinMode(D_pot, INPUT);
   /*Aplicar aceleração inicial nos ESCs*/
   initMotores();
 
@@ -75,12 +90,17 @@ void setup() {
 
   kalmanX.setAngle(roll); // Filtra o sinal dos ângulos iniciais
   kalmanY.setAngle(pitch);
+
   timer = micros(); // Pega o tempo de funcionamento da placa, para uso do Filtro.
-  tempo = millis(); // Inicia o contador da variaçãp de tempo do PID
+  tempo = millis(); // Inicia o contador da variação de tempo do PID
   delay(4000); // Aguarda os motores calibrarem (Bips)
 }
 
+
+
+
 void loop() {
+
   /*Calculo da Variação de tempo para derivativa PID*/
   tempoAnterior = tempo;
   tempo = millis();
@@ -101,7 +121,7 @@ void loop() {
 
   // Source: http://www.freescale.com/files/sensors/doc/app_note/AN3461.pdf eq. 25 and eq. 26
   // atan2 outputs the value of -π to π (radians) - see http://en.wikipedia.org/wiki/Atan2
-  // Conversão de radioanos para graus
+  // Conversão de radianos para graus
 
   double roll  = atan2(accY, accZ) * RAD_TO_DEG;
   double pitch = atan(-accX / sqrt(accY * accY + accZ * accZ)) * RAD_TO_DEG;
@@ -138,9 +158,20 @@ void loop() {
   //
 
 
+  leitura_P = analogRead(P_pot);
+  leitura_I = analogRead(I_pot);
+  leitura_D = analogRead(D_pot);
+  Kp = map (leitura_P, 0, 1024, 0, 300 );
+  Kp = (Kp / 100);
+  Ki = map (leitura_I, 0, 1024, 0, 200 );
+  Ki = (Ki / 100);
+  Kd = map (leitura_D, 0, 1024, 0, 200 );
+  Kd = (Kd / 100);
+
+
   //Salva o erro anterior e calcula o atual,
-  erroAnteriorX = erroX;
-  erroX = ang_desejado - kalAngleX;
+
+  erroX = kalAngleX - ang_desejado;
 
   // Proporcional
   P = Kp * erroX;
@@ -161,7 +192,7 @@ void loop() {
 
   }
 
-  //Soma dos termos
+  //Soma os termos
   pidX = P + I + D;
 
 
@@ -169,8 +200,8 @@ void loop() {
 
   // Observou-se que se o PID é positivo,
   // o angulo lido é negativo e vice versa!
-  aceleracaoM1 = throttle + pidX;
-  aceleracaoM2 = throttle - pidX;
+  aceleracaoM1 = throttle - pidX;
+  aceleracaoM2 = throttle + pidX;
 
 
   // Segurança na aceleração:
@@ -187,43 +218,43 @@ void loop() {
 
 
   // Print Data
-  Serial.print("Angulo: ");
+  Serial.print("Angulo:");
   Serial.print(kalAngleX);
-  Serial.print("\t");
-  Serial.println("\t");
-/*
-  Serial.print("Erro: ");
-  Serial.print(erroX);
-  Serial.print("\t");
-  Serial.print("\t");
+  //    Serial.print("\t");
+  //    Serial.print("\t");
+
+  //    Serial.print("Erro: ");
+  //    Serial.print(erroX);
+  //    Serial.print("\t");
+  //    Serial.print("\t");
 
   Serial.print("P: ");
-  Serial.print(P);
-  Serial.print("\t");
-  Serial.print("\t");
+  Serial.print(leitura_P);
+  //    Serial.print("\t");
+  //    Serial.print("\t");
 
   Serial.print("I: ");
-  Serial.print(I);
-  Serial.print("\t");
-  Serial.print("\t");
+  Serial.print(leitura_I);
+  //    Serial.print("\t");
+  //    Serial.print("\t");
 
   Serial.print("D: ");
-  Serial.print(D);
-  Serial.print("\t");
-  Serial.print("\t");
-  Serial.print("  ");
-
-  Serial.print("PID: ");
-  Serial.print(pidX);
-  Serial.print("\t");
+  Serial.print(leitura_D);
   Serial.println("\t");
+  //    Serial.print("\t");
+  //    Serial.println("  ");
+
+  //    Serial.print("PID: ");
+  //    Serial.print(pidX);
+  //    Serial.print("\t");
+  //    Serial.println("\t");
 
   //  Serial.print("Esq M1: "); Serial.print(aceleracaoM1); Serial.print("\t");
   //  Serial.print("\t");
   //  Serial.print("Dir M2: "); Serial.print(aceleracaoM2); Serial.println("\t");
 
-*/
 
+  erroAnteriorX = erroX;
 } // Fim do Loop
 
 
@@ -247,7 +278,7 @@ void iniciarMPU() {
 
   while (i2cRead(0x75, i2cData, 1));
   if (i2cData[0] != 0x68) { // Read "WHO_AM_I" register
-    Serial.print(F("Error reading sensor"));
+    //Serial.print(F("Error reading sensor"));
     while (1);
   }
   delay(100); // Wait for sensor to stabilize
