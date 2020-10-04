@@ -1,3 +1,4 @@
+// BIBLIOTECAS:
 #include <Wire.h> // COmunicação através de protocolo I2C
 #include <Kalman.h> // Filtro de Kalman Source: https://github.com/TKJElectronics/KalmanFilter
 #include <Servo.h> // Controle dos motores Brushless
@@ -26,7 +27,7 @@ int leitura_D = 0;
 double  throttle = 1300;
 
 
-/* Variáveis para cálculos com o MPU-6050 */
+/* Eixos do MPU-6050 */
 double accX, accY, accZ; //Valores lidos do acelerometro
 double gyroX, gyroY, gyroZ; //Valores lidos do giroscópio
 
@@ -161,15 +162,15 @@ void loop() {
   leitura_P = analogRead(P_pot);
   leitura_I = analogRead(I_pot);
   leitura_D = analogRead(D_pot);
-  Kp = map (leitura_P, 0, 1024, 0, 300 );
+  Kp = map (leitura_P, 0, 1024, 0, 50 );
   Kp = (Kp / 100);
-  Ki = map (leitura_I, 0, 1024, 0, 200 );
+  Ki = map (leitura_I, 0, 1024, 0, 50 );
   Ki = (Ki / 100);
-  Kd = map (leitura_D, 0, 1024, 0, 200 );
+  Kd = map (leitura_D, 0, 1024, 0, 50 );
   Kd = (Kd / 100);
 
 
-  //Salva o erro anterior e calcula o atual,
+  //Salva o erro anterior e calcula o atual
 
   erroX = kalAngleX - ang_desejado;
 
@@ -226,7 +227,7 @@ void loop() {
   //    Serial.print("Erro: ");
   //    Serial.print(erroX);
   //    Serial.print("\t");
-  //    Serial.print("\t");
+  //    Serial.print("\tn");
 
   Serial.print("P: ");
   Serial.print(leitura_P);
